@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>IPTV+ трейлър</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #p { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #ccc; font: 28px sans-serif; text-align: center; padding: 0 10%; }
+</style>
+</head>
+<body>
+<div id="p"></div>
+<div id="msg"></div>
+<script>
+/* Плейърът за трейлърите на IPTV+ (телевизорът).
+   YouTube пуска вградено видео само от страница с уеб адрес – приложението на телевизора се зарежда от файл,
+   затова го вгражда през тази страница. Адресът: ?v=<ключ на видеото в YouTube>.
+   Командите идват от приложението (postMessage): { iptv: 'cmd', f: 'pauseVideo' | 'playVideo' | 'seekTo', a: [...] };
+   обратно – { iptv: 'st', time, state, dur } на всяка половин секунда и { iptv: 'err', code } при грешка. */
+(function () {
+  var q = new URLSearchParams(location.search), v = (q.get('v') || '').replace(/[^\w-]/g, '');
+  var msg = document.getElementById('msg'), player = null;
+  if (!v) { msg.textContent = 'Няма видео'; return; }
+  function up(o) { o.iptv = o.iptv || 'st'; try { parent.postMessage(o, '*'); } catch (e) { /* */ } }
+  window.onYouTubeIframeAPIReady = function () {
+    player = new YT.Player('p', {
+      videoId: v,
+      host: 'https://www.youtube-nocookie.com',
+      playerVars: { autoplay: 1, controls: 0, rel: 0, playsinline: 1, iv_load_policy: 3, modestbranding: 1, origin: location.origin },
+      events: {
+        onReady: function (e) { e.target.playVideo(); },
+        onError: function (e) { up({ iptv: 'err', code: e.data }); msg.textContent = 'Трейлърът не може да се пусне (' + e.data + ')'; }
+      }
+    });
+    setInterval(function () {
+      if (!player || !player.getCurrentTime) return;
+      up({ time: player.getCurrentTime(), state: player.getPlayerState(), dur: player.getDuration() });
+    }, 500);
+  };
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.iptv !== 'cmd' || !player || typeof player[d.f] !== 'function') return;
+    if (['playVideo', 'pauseVideo', 'seekTo', 'setVolume', 'mute', 'unMute'].indexOf(d.f) < 0) return;
+    player[d.f].apply(player, d.a || []);
+  });
+  var s = document.createElement('script');
+  s.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
