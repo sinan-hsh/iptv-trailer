@@ -32,7 +32,7 @@
       playerVars: { autoplay: 1, controls: 0, rel: 0, playsinline: 1, iv_load_policy: 3, modestbranding: 1, origin: location.origin },
       events: {
         onReady: function (e) { e.target.playVideo(); },
-        onError: function (e) { up({ iptv: 'err', code: e.data }); msg.textContent = 'Трейлърът не може да се пусне (' + e.data + ')'; }
+        onError: function (e) { up({ iptv: 'err', code: e.data }); }
       }
     });
     setInterval(function () {
@@ -43,7 +43,7 @@
   window.addEventListener('message', function (e) {
     var d = e.data;
     if (!d || d.iptv !== 'cmd' || !player || typeof player[d.f] !== 'function') return;
-    if (['playVideo', 'pauseVideo', 'seekTo', 'setVolume', 'mute', 'unMute'].indexOf(d.f) < 0) return;
+    if (['playVideo', 'pauseVideo', 'seekTo', 'loadVideoById', 'setVolume', 'mute', 'unMute'].indexOf(d.f) < 0) return;
     player[d.f].apply(player, d.a || []);
   });
   var s = document.createElement('script');
