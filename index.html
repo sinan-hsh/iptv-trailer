@@ -18,7 +18,7 @@
 <script>
 /* Плейърът за трейлърите на IPTV+ (телевизорът).
    YouTube пуска вградено видео само от страница с уеб адрес – приложението на телевизора се зарежда от файл,
-   затова го вгражда през тази страница. Адресът: ?v=<ключ на видеото в YouTube> (&c=0 – без бутоните на YouTube).
+   затова го вгражда през тази страница. Адресът: ?v=<ключ на видеото в YouTube> (&c=0 – без бутоните на YouTube; &a=0 – подготовка: без звук до първия кадър, после пауза в началото -> { iptv: 'ready' }).
    Командите идват от приложението (postMessage): { iptv: 'cmd', f, a: [...] } – playVideo, pauseVideo, seekTo,
    loadVideoById, setVolume, mute, unMute, setPlaybackRate; 'cc' [език] / [] – субтитри (YouTube не дава списъка
    им през API – плейърът се създава наново със cc_load_policy/cc_lang_pref оттам, докъдето е стигнал).
@@ -26,7 +26,7 @@
    { iptv: 'end' } в края и { iptv: 'err', code } при грешка. */
 (function () {
   var q = new URLSearchParams(location.search), v = (q.get('v') || '').replace(/[^\w-]/g, '');
-  var msg = document.getElementById('msg'), player = null, ccOn = '', keep = { rate: 1, vol: 100, muted: false };
+  var msg = document.getElementById('msg'), player = null, ccOn = '', keep = { rate: 1, vol: 100, muted: false }, pre = q.get('a') === '0';
   if (!v) { msg.textContent = 'Няма видео'; return; }
   function up(o) { o.iptv = o.iptv || 'st'; try { parent.postMessage(o, '*'); } catch (e) { /* */ } }
   // размерът – от самото начало на цял екран: YouTube избира качеството по размера при създаването
@@ -44,11 +44,22 @@
           // след смяна на субтитрите – скоростта и звукът остават
           if (keep.rate !== 1) p.setPlaybackRate(keep.rate);
           p.setVolume(keep.vol); if (keep.muted) p.mute();
+          // &a=0 – подготовка отзад (приложението още е в информацията): тръгва без звук, взима началото
+          // и спира в началото – при „пусни“ тръгва веднага
+          if (pre) { p.mute(); }
           p.playVideo();
         },
         onPlaybackQualityChange: function (e) { up({ iptv: 'q', q: e.data }); },
         // свърши – казваме веднага (приложението затваря и се връща в информацията)
-        onStateChange: function (e) { if (e.data === 0) up({ iptv: 'end' }); },
+        onStateChange: function (e) {
+          if (e.data === 0) up({ iptv: 'end' });
+          if (pre && e.data === 1) {
+            pre = false;
+            e.target.pauseVideo(); e.target.seekTo(0, true);
+            if (!keep.muted) e.target.unMute();
+            up({ iptv: 'ready' });
+          }
+        },
         onError: function (e) { up({ iptv: 'err', code: e.data }); }
       }
     });
@@ -75,6 +86,8 @@
     var d = e.data;
     if (!d || d.iptv !== 'cmd' || !player) return;
     if (d.f === 'cc') { cc((d.a || [])[0]); return; }
+    // „пусни“ от приложението – и ако подготовката още не е стигнала до първия кадър (тогава не спираме)
+    if (d.f === 'go') { pre = false; try { if (!keep.muted) player.unMute(); player.playVideo(); } catch (x) { /* */ } return; }
     if (d.f === 'loadVideoById') { v = String((d.a || [])[0] || '').replace(/[^\w-]/g, ''); }
     if (typeof player[d.f] !== 'function') return;
     if (['playVideo', 'pauseVideo', 'seekTo', 'loadVideoById', 'setVolume', 'mute', 'unMute', 'setPlaybackRate'].indexOf(d.f) < 0) return;
