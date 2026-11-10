@@ -7,7 +7,7 @@
 <title>IPTV+ трейлър</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  #p { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #p, iframe#p { position: absolute; top: 0; left: 0; width: 100vw !important; height: 100vh !important; border: 0; }
   #msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #ccc; font: 28px sans-serif; text-align: center; padding: 0 10%; }
 </style>
 </head>
@@ -26,12 +26,19 @@
   if (!v) { msg.textContent = 'Няма видео'; return; }
   function up(o) { o.iptv = o.iptv || 'st'; try { parent.postMessage(o, '*'); } catch (e) { /* */ } }
   window.onYouTubeIframeAPIReady = function () {
+    // boyutu – от самото начало на цял екран: YouTube избира качеството по размера при създаването
+    // (по подразбиране 640×390 – тогава е ниско качество и кръгчето „зарежда“ е горе вляво)
     player = new YT.Player('p', {
       videoId: v,
+      width: '100%',
+      height: '100%',
       host: 'https://www.youtube-nocookie.com',
-      playerVars: { autoplay: 1, controls: 0, rel: 0, playsinline: 1, iv_load_policy: 3, modestbranding: 1, origin: location.origin },
+      playerVars: { autoplay: 1, controls: 0, vq: 'hd1080', rel: 0, playsinline: 1, iv_load_policy: 3, modestbranding: 1, origin: location.origin },
       events: {
-        onReady: function (e) { e.target.playVideo(); },
+        onReady: function (e) { try { e.target.setPlaybackQuality('hd1080'); } catch (x) { /* */ } e.target.playVideo(); },
+        onPlaybackQualityChange: function (e) { up({ iptv: 'q', q: e.data }); },
+        // свърши – казваме веднага (приложението затваря и се връща в информацията)
+        onStateChange: function (e) { if (e.data === 0) up({ iptv: 'end' }); },
         onError: function (e) { up({ iptv: 'err', code: e.data }); }
       }
     });
