@@ -4,98 +4,91 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="preconnect" href="https://www.youtube-nocookie.com">
+<link rel="preconnect" href="https://www.youtube.com">
+<link rel="preconnect" href="https://i.ytimg.com">
+<link rel="preconnect" href="https://www.google.com">
 <title>IPTV+ трейлър</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  #p, iframe#p { position: absolute; top: 0; left: 0; width: 100vw !important; height: 100vh !important; border: 0; }
-  #msg:empty { display: none; }
-  #msg { pointer-events: none; position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; color: #ccc; font: 28px sans-serif; text-align: center; padding: 0 10%; }
+  iframe { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; border: 0; }
 </style>
 </head>
 <body>
-<div id="p"></div>
-<div id="msg"></div>
 <script>
 /* Плейърът за трейлърите на IPTV+ (телевизорът).
    YouTube пуска вградено видео само от страница с уеб адрес – приложението на телевизора се зарежда от файл,
-   затова го вгражда през тази страница. Адресът: ?v=<ключ на видеото в YouTube> (&c=0 – без бутоните на YouTube; &a=0 – подготовка: без звук до първия кадър, после пауза в началото -> { iptv: 'ready' }).
-   Командите идват от приложението (postMessage): { iptv: 'cmd', f, a: [...] } – playVideo, pauseVideo, seekTo,
-   loadVideoById, setVolume, mute, unMute, setPlaybackRate; 'cc' [език] / [] – субтитри (YouTube не дава списъка
-   им през API – плейърът се създава наново със cc_load_policy/cc_lang_pref оттам, докъдето е стигнал).
+   затова го вгражда през тази страница. Плейърът се слага направо (iframe към embed) – без скрипта iframe_api
+   и неговия втори скрипт: на телевизора всяка стъпка е бавна. Говорим с него по неговия протокол (postMessage).
+   Адресът: ?v=<ключ на видеото в YouTube> (&c=0 – без бутоните на YouTube).
+   Командите от приложението: { iptv: 'cmd', f, a: [...] } – playVideo, pauseVideo, seekTo, loadVideoById,
+   setVolume, mute, unMute, setPlaybackRate; 'cc' [език] / [] – субтитри (YouTube не дава списъка им през
+   API – плейърът се зарежда наново със cc_load_policy/cc_lang_pref оттам, докъдето е стигнал).
    Обратно – { iptv: 'st', time, state, dur, rate, vol, muted, cc } на всяка половин секунда,
-   { iptv: 'end' } в края и { iptv: 'err', code } при грешка. */
+   { iptv: 'q', q } при смяна на качеството, { iptv: 'end' } в края и { iptv: 'err', code } при грешка. */
 (function () {
+  var YT = 'https://www.youtube-nocookie.com';
   var q = new URLSearchParams(location.search), v = (q.get('v') || '').replace(/[^\w-]/g, '');
-  var msg = document.getElementById('msg'), player = null, ccOn = '', keep = { rate: 1, vol: 100, muted: false }, pre = q.get('a') === '0';
-  if (!v) { msg.textContent = 'Няма видео'; return; }
+  var fr = null, ccOn = '', st = {}, keep = { rate: 1, vol: 100, muted: false };
+  if (!v) return;
   function up(o) { o.iptv = o.iptv || 'st'; try { parent.postMessage(o, '*'); } catch (e) { /* */ } }
-  // размерът – от самото начало на цял екран: YouTube избира качеството по размера при създаването
-  // (по подразбиране 640×390 – тогава е ниско качество и кръгчето „зарежда“ е горе вляво)
+  function send(o) { try { fr.contentWindow.postMessage(JSON.stringify(o), YT); } catch (e) { /* още се зарежда */ } }
+  function cmd(f, a) { send({ event: 'command', func: f, args: a || [], id: 1, channel: 'widget' }); }
+  function url(start) {
+    var p = 'autoplay=1&controls=' + (q.get('c') === '0' ? 0 : 1) + '&rel=0&playsinline=1&iv_load_policy=3&enablejsapi=1&origin=' + encodeURIComponent(location.origin);
+    if (start) p += '&start=' + Math.floor(start);
+    if (ccOn) p += '&cc_load_policy=1&cc_lang_pref=' + ccOn + '&hl=' + ccOn;
+    return YT + '/embed/' + v + '?' + p;
+  }
   function make(start) {
-    var pv = { autoplay: 1, controls: q.get('c') === '0' ? 0 : 1, vq: 'hd1080', rel: 0, playsinline: 1, origin: location.origin,
-      cc_load_policy: ccOn ? 1 : 0, start: Math.floor(start || 0) };
-    if (ccOn) { pv.cc_lang_pref = ccOn; pv.hl = ccOn; }
-    player = new YT.Player('p', {
-      videoId: v, width: '100%', height: '100%', host: 'https://www.youtube-nocookie.com', playerVars: pv,
-      events: {
-        onReady: function (e) {
-          var p = e.target;
-          try { p.setPlaybackQuality('hd1080'); } catch (x) { /* */ }
-          // след смяна на субтитрите – скоростта и звукът остават
-          if (keep.rate !== 1) p.setPlaybackRate(keep.rate);
-          p.setVolume(keep.vol); if (keep.muted) p.mute();
-          // &a=0 – подготовка отзад (приложението още е в информацията): тръгва без звук, взима началото
-          // и спира в началото – при „пусни“ тръгва веднага
-          if (pre) { p.mute(); }
-          p.playVideo();
-        },
-        onPlaybackQualityChange: function (e) { up({ iptv: 'q', q: e.data }); },
-        // свърши – казваме веднага (приложението затваря и се връща в информацията)
-        onStateChange: function (e) {
-          if (e.data === 0) up({ iptv: 'end' });
-          if (pre && e.data === 1) {
-            pre = false;
-            e.target.pauseVideo(); e.target.seekTo(0, true);
-            if (!keep.muted) e.target.unMute();
-            up({ iptv: 'ready' });
-          }
-        },
-        onError: function (e) { up({ iptv: 'err', code: e.data }); }
-      }
-    });
+    if (fr && fr.parentNode) fr.parentNode.removeChild(fr);
+    fr = document.createElement('iframe');
+    fr.setAttribute('allow', 'autoplay; encrypted-media; fullscreen');
+    fr.src = url(start);
+    // плейърът праща състоянието си чак след като му кажем, че слушаме
+    fr.onload = function () { send({ event: 'listening', id: 1, channel: 'widget' }); };
+    document.body.appendChild(fr);
   }
-  function cc(lang) {
-    lang = String(lang || '').replace(/[^\w-]/g, '');
-    if (lang === ccOn || !player) return;
-    var t = 0;
-    try { t = player.getCurrentTime(); keep = { rate: player.getPlaybackRate(), vol: player.getVolume(), muted: player.isMuted() }; player.destroy(); } catch (e) { /* */ }
-    ccOn = lang;
-    var d = document.createElement('div'); d.id = 'p';
-    var old = document.getElementById('p'); if (old) old.parentNode.replaceChild(d, old); else document.body.insertBefore(d, msg);
-    make(t);
-  }
-  window.onYouTubeIframeAPIReady = function () {
-    make(0);
-    setInterval(function () {
-      if (!player || !player.getCurrentTime) return;
-      up({ time: player.getCurrentTime(), state: player.getPlayerState(), dur: player.getDuration(),
-        rate: player.getPlaybackRate ? player.getPlaybackRate() : 1, vol: player.getVolume ? player.getVolume() : 100, muted: player.isMuted ? player.isMuted() : false, cc: ccOn });
-    }, 500);
-  };
   window.addEventListener('message', function (e) {
-    var d = e.data;
-    if (!d || d.iptv !== 'cmd' || !player) return;
-    if (d.f === 'cc') { cc((d.a || [])[0]); return; }
-    // „пусни“ от приложението – и ако подготовката още не е стигнала до първия кадър (тогава не спираме)
-    if (d.f === 'go') { pre = false; try { if (!keep.muted) player.unMute(); player.playVideo(); } catch (x) { /* */ } return; }
-    if (d.f === 'loadVideoById') { v = String((d.a || [])[0] || '').replace(/[^\w-]/g, ''); }
-    if (typeof player[d.f] !== 'function') return;
-    if (['playVideo', 'pauseVideo', 'seekTo', 'loadVideoById', 'setVolume', 'mute', 'unMute', 'setPlaybackRate'].indexOf(d.f) < 0) return;
-    player[d.f].apply(player, d.a || []);
+    if (e.origin !== YT) {   // от приложението
+      var c = e.data;
+      if (!c || c.iptv !== 'cmd') return;
+      if (c.f === 'cc') {
+        var l = String((c.a || [])[0] || '').replace(/[^\w-]/g, '');
+        if (l === ccOn) return;
+        keep = { rate: st.rate || 1, vol: st.vol == null ? 100 : st.vol, muted: !!st.muted };
+        ccOn = l; make(st.time || 0);
+      } else if (c.f === 'loadVideoById') {
+        v = String((c.a || [])[0] || '').replace(/[^\w-]/g, ''); st = {}; make(0);
+      } else if (['playVideo', 'pauseVideo', 'seekTo', 'setVolume', 'mute', 'unMute', 'setPlaybackRate'].indexOf(c.f) >= 0) cmd(c.f, c.a || []);
+      return;
+    }
+    var d; try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
+    if (!d || !d.event) return;
+    if (d.event === 'onReady') {
+      // след смяна на субтитрите – скоростта и звукът остават
+      if (keep.rate !== 1) cmd('setPlaybackRate', [keep.rate]);
+      cmd('setVolume', [keep.vol]); if (keep.muted) cmd('mute');
+      cmd('playVideo');
+    }
+    if (d.event === 'onStateChange' && d.info === 0) up({ iptv: 'end' });   // свърши – приложението затваря
+    if (d.event === 'onError') up({ iptv: 'err', code: d.info });
+    if (d.event === 'onPlaybackQualityChange') up({ iptv: 'q', q: d.info });
+    if (d.event === 'infoDelivery' && d.info) {
+      var i = d.info;
+      if (i.currentTime != null) st.time = i.currentTime;
+      if (i.duration != null) st.dur = i.duration;
+      if (i.playerState != null) st.state = i.playerState;
+      if (i.playbackRate != null) st.rate = i.playbackRate;
+      if (i.volume != null) st.vol = i.volume;
+      if (i.muted != null) st.muted = i.muted;
+      if (i.playbackQuality && i.playbackQuality !== st.q) { st.q = i.playbackQuality; up({ iptv: 'q', q: st.q }); }
+    }
   });
-  var s = document.createElement('script');
-  s.src = 'https://www.youtube.com/iframe_api';
-  document.head.appendChild(s);
+  setInterval(function () {
+    up({ time: st.time || 0, state: st.state == null ? -1 : st.state, dur: st.dur || 0, rate: st.rate || 1, vol: st.vol == null ? 100 : st.vol, muted: !!st.muted, cc: ccOn });
+  }, 500);
+  make(0);
 })();
 </script>
 </body>
