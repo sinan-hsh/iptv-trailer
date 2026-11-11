@@ -69,6 +69,9 @@
       // след смяна на субтитрите – скоростта и звукът остават
       if (keep.rate !== 1) cmd('setPlaybackRate', [keep.rate]);
       cmd('setVolume', [keep.vol]); if (keep.muted) cmd('mute');
+      // субтитри „Изкл.“ – YouTube иначе пуска своите по предпочитанието в бисквитката (напр. английски
+      // върху вградените турски); махаме модула им. При избран език – само той (cc_lang_pref)
+      if (!ccOn) { cmd('unloadModule', ['captions']); cmd('unloadModule', ['cc']); }
       cmd('playVideo');
     }
     if (d.event === 'onStateChange' && d.info === 0) up({ iptv: 'end' });   // свърши – приложението затваря
