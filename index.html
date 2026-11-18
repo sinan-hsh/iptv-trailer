@@ -20,7 +20,8 @@
    YouTube пуска вградено видео само от страница с уеб адрес – приложението на телевизора се зарежда от файл,
    затова го вгражда през тази страница. Плейърът се слага направо (iframe към embed) – без скрипта iframe_api
    и неговия втори скрипт: на телевизора всяка стъпка е бавна. Говорим с него по неговия протокол (postMessage).
-   Адресът: ?v=<ключ на видеото в YouTube> (&c=0 – без бутоните на YouTube).
+   Адресът: ?v=<ключ на видеото в YouTube> (&c=0 – без бутоните на YouTube, &m=1 – без звук от самото начало:
+   фоновият трейлър в информацията – иначе звукът се чува, докато командата mute стигне до плейъра).
    Командите от приложението: { iptv: 'cmd', f, a: [...] } – playVideo, pauseVideo, seekTo, loadVideoById,
    setVolume, mute, unMute, setPlaybackRate; 'cc' [език] / [] – субтитри (YouTube не дава списъка им през
    API – плейърът се зарежда наново със cc_load_policy/cc_lang_pref оттам, докъдето е стигнал).
@@ -29,16 +30,21 @@
 (function () {
   var YT = 'https://www.youtube-nocookie.com';
   var q = new URLSearchParams(location.search), v = (q.get('v') || '').replace(/[^\w-]/g, '');
-  var fr = null, ccOn = '', st = {}, keep = { rate: 1, vol: 100, muted: false };
+  var fr = null, ccOn = '', st = {}, keep = { rate: 1, vol: 100, muted: q.get('m') === '1' };
   if (!v) return;
   function up(o) { o.iptv = o.iptv || 'st'; try { parent.postMessage(o, '*'); } catch (e) { /* */ } }
   function send(o) { try { fr.contentWindow.postMessage(JSON.stringify(o), YT); } catch (e) { /* още се зарежда */ } }
   function cmd(f, a) { send({ event: 'command', func: f, args: a || [], id: 1, channel: 'widget' }); }
   function url(start) {
     var p = 'autoplay=1&controls=' + (q.get('c') === '0' ? 0 : 1) + '&rel=0&playsinline=1&iv_load_policy=3&enablejsapi=1&origin=' + encodeURIComponent(location.origin);
+    if (keep.muted) p += '&mute=1';
     if (start) p += '&start=' + Math.floor(start);
     if (ccOn) p += '&cc_load_policy=1&cc_lang_pref=' + ccOn + '&hl=' + ccOn;
     return YT + '/embed/' + v + '?' + p;
+  }
+  function noCc() {
+    cmd('unloadModule', ['captions']); cmd('unloadModule', ['cc']);
+    cmd('setOption', ['captions', 'track', {}]);
   }
   function make(start) {
     if (fr && fr.parentNode) fr.parentNode.removeChild(fr);
@@ -71,9 +77,11 @@
       cmd('setVolume', [keep.vol]); if (keep.muted) cmd('mute');
       // субтитри „Изкл.“ – YouTube иначе пуска своите по предпочитанието в бисквитката (напр. английски
       // върху вградените турски); махаме модула им. При избран език – само той (cc_lang_pref)
-      if (!ccOn) { cmd('unloadModule', ['captions']); cmd('unloadModule', ['cc']); }
+      if (!ccOn) noCc();
       cmd('playVideo');
     }
+    // фонът (&m=1) – никакви субтитри: YouTube зарежда модула им наново при пускане/скок, затова се маха всеки път
+    if (d.event === 'onStateChange' && d.info === 1 && keep.muted && !ccOn) noCc();
     if (d.event === 'onStateChange' && d.info === 0) up({ iptv: 'end' });   // свърши – приложението затваря
     if (d.event === 'onError') up({ iptv: 'err', code: d.info });
     if (d.event === 'onPlaybackQualityChange') up({ iptv: 'q', q: d.info });
@@ -89,6 +97,7 @@
     }
   });
   setInterval(function () {
+    if (keep.muted && !ccOn && st.state === 1) noCc();   // фон – субтитрите не се връщат
     up({ time: st.time || 0, state: st.state == null ? -1 : st.state, dur: st.dur || 0, rate: st.rate || 1, vol: st.vol == null ? 100 : st.vol, muted: !!st.muted, cc: ccOn });
   }, 500);
   make(0);
