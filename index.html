@@ -22,6 +22,8 @@
    и неговия втори скрипт: на телевизора всяка стъпка е бавна. Говорим с него по неговия протокол (postMessage).
    Адресът: ?v=<ключ на видеото в YouTube> (&c=0 – без бутоните на YouTube, &m=1 – без звук от самото начало:
    фоновият трейлър в информацията – иначе звукът се чува, докато командата mute стигне до плейъра).
+   v2: &a=0 – само подготвен плейър (не тръгва); 'load' [ключ, начало, без звук] – друго видео в същия плейър;
+   'stopVideo' – пауза. Щом се зареди, страницата казва { iptv: 'hello', v: 2 }.
    Командите от приложението: { iptv: 'cmd', f, a: [...] } – playVideo, pauseVideo, seekTo, loadVideoById,
    setVolume, mute, unMute, setPlaybackRate; 'cc' [език] / [] – субтитри (YouTube не дава списъка им през
    API – плейърът се зарежда наново със cc_load_policy/cc_lang_pref оттам, докъдето е стигнал).
@@ -30,13 +32,13 @@
 (function () {
   var YT = 'https://www.youtube-nocookie.com';
   var q = new URLSearchParams(location.search), v = (q.get('v') || '').replace(/[^\w-]/g, '');
-  var fr = null, ccOn = '', st = {}, keep = { rate: 1, vol: 100, muted: q.get('m') === '1' };
+  var fr = null, ccOn = '', st = {}, keep = { rate: 1, vol: 100, muted: q.get('m') === '1' }, ready = false, auto = q.get('a') !== '0';
   if (!v) return;
   function up(o) { o.iptv = o.iptv || 'st'; try { parent.postMessage(o, '*'); } catch (e) { /* */ } }
   function send(o) { try { fr.contentWindow.postMessage(JSON.stringify(o), YT); } catch (e) { /* още се зарежда */ } }
   function cmd(f, a) { send({ event: 'command', func: f, args: a || [], id: 1, channel: 'widget' }); }
   function url(start) {
-    var p = 'autoplay=1&controls=' + (q.get('c') === '0' ? 0 : 1) + '&rel=0&playsinline=1&iv_load_policy=3&enablejsapi=1&origin=' + encodeURIComponent(location.origin);
+    var p = 'autoplay=' + (auto ? 1 : 0) + '&controls=' + (q.get('c') === '0' ? 0 : 1) + '&rel=0&playsinline=1&iv_load_policy=3&enablejsapi=1&origin=' + encodeURIComponent(location.origin);
     if (keep.muted) p += '&mute=1';
     if (start) p += '&start=' + Math.floor(start);
     if (ccOn) p += '&cc_load_policy=1&cc_lang_pref=' + ccOn + '&hl=' + ccOn;
@@ -48,6 +50,7 @@
   }
   function make(start) {
     if (fr && fr.parentNode) fr.parentNode.removeChild(fr);
+    ready = false;
     fr = document.createElement('iframe');
     fr.setAttribute('allow', 'autoplay; encrypted-media; fullscreen');
     fr.src = url(start);
@@ -64,6 +67,15 @@
         if (l === ccOn) return;
         keep = { rate: st.rate || 1, vol: st.vol == null ? 100 : st.vol, muted: !!st.muted };
         ccOn = l; make(st.time || 0);
+      } else if (c.f === 'load') {
+        // v2: друго видео в СЪЩИЯ плейър – без да се зарежда наново (приложението държи страницата готова:
+        // фонов трейлър в информацията без 2–3 s тежко зареждане на всяко отваряне). [ключ, начало, без звук]
+        v = String((c.a || [])[0] || '').replace(/[^\w-]/g, ''); st = {}; auto = true;
+        if (c.a && c.a[2] != null) keep.muted = !!c.a[2];
+        if (!v) return;
+        if (fr && ready) { if (keep.muted) cmd('mute'); cmd('loadVideoById', [v, +(c.a[1] || 0)]); if (!ccOn) noCc(); }
+        else make(+(c.a[1] || 0));
+      } else if (c.f === 'stopVideo') { cmd('pauseVideo'); st = {};
       } else if (c.f === 'loadVideoById') {
         v = String((c.a || [])[0] || '').replace(/[^\w-]/g, ''); st = {}; make(0);
       } else if (['playVideo', 'pauseVideo', 'seekTo', 'setVolume', 'mute', 'unMute', 'setPlaybackRate'].indexOf(c.f) >= 0) cmd(c.f, c.a || []);
@@ -72,6 +84,8 @@
     var d; try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
     if (!d || !d.event) return;
     if (d.event === 'onReady') {
+      ready = true;
+      if (!auto) { if (keep.muted) cmd('mute'); return; }   // само подготвен (&a=0) – чака „load“
       // след смяна на субтитрите – скоростта и звукът остават
       if (keep.rate !== 1) cmd('setPlaybackRate', [keep.rate]);
       cmd('setVolume', [keep.vol]); if (keep.muted) cmd('mute');
@@ -100,6 +114,7 @@
     if (keep.muted && !ccOn && st.state === 1) noCc();   // фон – субтитрите не се връщат
     up({ time: st.time || 0, state: st.state == null ? -1 : st.state, dur: st.dur || 0, rate: st.rate || 1, vol: st.vol == null ? 100 : st.vol, muted: !!st.muted, cc: ccOn });
   }, 500);
+  up({ iptv: 'hello', v: 2 });   // приложението разбира, че страницата знае „load“
   make(0);
 })();
 </script>
